@@ -7,13 +7,10 @@ import (
 // Build a default int-typed Piper
 func BuildTestPipe(t *testing.T) (piper Handler) {
 	piper, err := New(
-		make(chan int),
-		make(chan int),
-		P{
+		P(
 			1,
-			make(chan int),
 			func(d int) int { return d + 1 },
-		},
+		),
 	)
 
 	if err != nil {
@@ -73,9 +70,7 @@ func TestClosePipe(t *testing.T) {
 
 func TestPipeCheck(t *testing.T) {
 	_, err := newPiper(
-		make(chan int),
-		make(chan int),
-		[]P{},
+		[]Pipe{},
 	)
 
 	if err != ErrNoPiperFunc {
@@ -83,14 +78,11 @@ func TestPipeCheck(t *testing.T) {
 	}
 
 	piper, _ := newPiper(
-		make(chan int),
-		make(chan int),
-		[]P{
-			P{
+		[]Pipe{
+			P(
 				0,
-				make(chan int),
 				func(d int) int { return d },
-			},
+			),
 		},
 	)
 
@@ -106,68 +98,16 @@ func TestPipeCheck(t *testing.T) {
 		t.Errorf("Expected `pipe.GetOutput` to return a '%+v' (got '%+v')", "chan int", output)
 	}
 
-	_, err2 := newPiper(
-		make(chan int),
-		make(chan int),
-		[]P{
-			P{
-				1,
-				make(chan string),
-				func(d int) int { return d },
-			},
-		},
-	)
-
-	if err2 != ErrInvalidPipeChannel {
-		t.Errorf("Expected `err` to be '%+v' (got '%+v')", ErrInvalidPipeChannel, err2)
-	}
-
-}
-
-func TestNewPipeInvalidOutput(t *testing.T) {
-	_, err := newPiper(
-		1,
-		make(chan int),
-		[]P{
-			P{
-				1,
-				make(chan int),
-				func(d int) int { return d + 1 },
-			},
-		},
-	)
-
-	if err != ErrInvalidInputChannel {
-		t.Errorf("Expected `err` to be '%v' (got '%v')", ErrInvalidInputChannel, err)
-	}
-
-	_, err = newPiper(
-		make(chan int),
-		1,
-		[]P{
-			P{
-				1,
-				make(chan int),
-				func(d int) int { return d + 1 },
-			},
-		},
-	)
-
-	if err != ErrInvalidOutputChannel {
-		t.Errorf("Expected `err` to be '%v' (got '%v')", ErrInvalidOutputChannel, err)
-	}
 }
 
 // Benchmarks
 
 func BenchmarkInputOutput(b *testing.B) {
 	piper, _ := New(
-		make(chan int),
-		P{
+		P(
 			1,
-			make(chan int),
 			func(d int) int { return d },
-		},
+		),
 	)
 
 	for i := 0; i < b.N; i++ {
@@ -177,19 +117,16 @@ func BenchmarkInputOutput(b *testing.B) {
 }
 
 func BenchmarkThousandsPipes(b *testing.B) {
-	pipes := make([]P, 10000)
+	pipes := make([]Pipe, 10000)
 
 	for i := 0; i < 10000; i++ {
-		pipes[i] = P{
+		pipes[i] = P(
 			1,
-			make(chan int),
 			func(d int) int { return d },
-		}
+		)
 	}
 
 	piper, _ := newPiper(
-		make(chan int),
-		make(chan int),
 		pipes,
 	)
 

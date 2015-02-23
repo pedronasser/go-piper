@@ -29,12 +29,12 @@ type (
 	// Piper is the main struct on the piper
 	Piper struct {
 		mu       sync.Mutex
-		pipes    []P
+		pipes    []Pipe
 		lastPipe reflect.Value
 		kill     reflect.Value
 		closed   bool
-		In       interface{}
-		Out      interface{}
+		in       interface{}
+		out      interface{}
 	}
 
 	// Handler manages the piper struct
@@ -46,59 +46,66 @@ type (
 )
 
 // New creates a new piper instance
-func New(in interface{}, out interface{}, pipefn ...P) (Handler, error) {
-	piper, err := newPiper(in, out, pipefn)
+func New(pipefn ...Pipe) (Handler, error) {
+	piper, err := newPiper(pipefn)
 	return Handler(piper), err
 }
 
 // Newpiper creates a new Piper from a channel and []*F
-func newPiper(in interface{}, out interface{}, pipefn []P) (*Piper, error) {
+func newPiper(pipefn []Pipe) (p *Piper, err error) {
 	if len(pipefn) == 0 {
 		return nil, ErrNoPiperFunc
 	}
 
-	if reflect.TypeOf(in).Kind() != reflect.Chan {
-		return nil, ErrInvalidInputChannel
-	}
-
-	if reflect.TypeOf(out).Kind() != reflect.Chan {
-		return nil, ErrInvalidOutputChannel
-	}
-
-	p := &Piper{
+	p = &Piper{
 		pipes:  pipefn,
-		In:     in,
-		Out:    out,
 		closed: false,
 	}
 
-	var pipe P
+	var pipe Pipe
 	for _, pipe = range p.pipes {
-		err := p.checkPipe(&pipe)
-		if err != nil {
-			return nil, err
-		}
+	    p.checkPipe(&pipe);
 	}
-	p.lastPipe = reflect.ValueOf(pipe.Out)
+	p.lastPipe = reflect.ValueOf(pipe.out)
+
+	p.createInput();
+    p.createOutput();
 
 	p.run()
 
-	return p, nil
+	return
+}
+
+// createInput cretes a new input channel based on the type of the first step's argument
+func (p *Piper) createInput() (err error) {
+	target := p.pipes[0]
+	p.in = reflect.Indirect(
+		reflect.MakeChan(
+			reflect.ChanOf(reflect.BothDir, reflect.TypeOf(target.Fn().Interface()).In(0)),
+			int(target.Workers()),
+		),
+	).Interface()
+
+	return
+}
+
+// createOutput cretes a new input channel based on the type of the last step's return
+func (p *Piper) createOutput() (err error) {
+	target := p.pipes[len(p.pipes)-1]
+	p.out = reflect.Indirect(
+		reflect.MakeChan(
+			reflect.ChanOf(reflect.BothDir, reflect.TypeOf(target.Fn().Interface()).Out(0)),
+			int(target.Workers()),
+		),
+	).Interface()
+
+	return
 }
 
 // checkPipe check's if the pipe is valid to be used in the piper
 func (p *Piper) checkPipe(pipe PHandler) error {
 	if pipe.Workers() < 1 {
 		pipe.SetWorkers(1)
-	}
-
-	fn := pipe.Fn().Interface()
-	out := pipe.Output().Interface()
-	fnout := reflect.TypeOf(fn).Out(0).Kind()
-	chanout := reflect.TypeOf(out).Elem().Kind()
-
-	if fnout != chanout {
-		return ErrInvalidPipeChannel
 	}
 
 	return nil
@@ -111,7 +118,7 @@ func (p *Piper) run() (err error) {
 	}
 
 	var prev reflect.Value
-	prev = reflect.ValueOf(p.In)
+	prev = reflect.ValueOf(p.in)
 	p.kill = reflect.ValueOf(make(chan bool, len(p.pipes)+1))
 
 	for _, pipe := range p.pipes {
@@ -133,27 +140,33 @@ func (p *Piper) runPipe(pipe PHandler, prev reflect.Value) (output reflect.Value
 	output = pipe.Output()
 	fn := pipe.Fn()
 
-	go func() {
-		selects := []reflect.SelectCase{
-			reflect.SelectCase{Dir: reflect.SelectRecv, Chan: prev},
-			reflect.SelectCase{Dir: reflect.SelectRecv, Chan: p.kill},
-		}
-
-		for {
-			chosen, recv, ok := reflect.Select(selects)
-			switch chosen {
-			case 0:
-				if ok {
-					v := fn.Call([]reflect.Value{recv})
-					output.Send(v[0])
-				}
-			case 1:
-				output.Close()
-				return
+	var w uint
+	for w = 0; w < pipe.Workers(); w++ {
+		go func() {
+			selects := []reflect.SelectCase{
+				reflect.SelectCase{Dir: reflect.SelectRecv, Chan: prev},
+				reflect.SelectCase{Dir: reflect.SelectRecv, Chan: p.kill},
 			}
 
-		}
-	}()
+			for {
+				chosen, recv, ok := reflect.Select(selects)
+				switch chosen {
+				case 0:
+					if ok {
+						v := fn.Call([]reflect.Value{recv})
+						output.Send(v[0])
+					}
+				case 1:
+					if pipe.Closed() == false {
+						output.Close()
+						pipe.Close()
+					}
+					return
+				}
+			}
+
+		}()
+	}
 
 	return
 }
@@ -172,7 +185,7 @@ func (p *Piper) outputMonitor() {
 			switch chosen {
 			case 0:
 				if ok {
-					reflect.ValueOf(p.Out).Send(recv)
+					reflect.ValueOf(p.out).Send(recv)
 				}
 			case 1:
 				return
@@ -201,8 +214,11 @@ func (p *Piper) Close() error {
 
 	tru := reflect.ValueOf(p.closed)
 
+	var w uint
 	for i := 0; i < len(p.pipes); i++ {
-		p.kill.Send(tru)
+		for w = 0; w < p.pipes[i].workerNumber; w++ {
+			p.kill.Send(tru)
+		}
 	}
 	p.kill.Send(tru)
 
@@ -214,19 +230,31 @@ func (p *Piper) Close() error {
 
 // Input returns the piper's input channel
 func (p *Piper) Input() interface{} {
-	return p.In
+	return p.in
 }
 
 // Output returns the piper's output channel
 func (p *Piper) Output() interface{} {
-	return p.Out
+	return p.out
+}
+
+// P creates a new P (pipe)
+func P(w uint, fn interface{}) (pipe Pipe) {
+	pipe = Pipe{}
+	pipe.workerNumber = w
+	pipe.pfunc = fn
+
+	pipe.createOutput()
+
+	return
 }
 
 type (
-	// P is the main struct for the pipe
-	P struct {
-		WorkerNumber uint
-		Out, Func    interface{}
+	// Pipe is the main struct for the pipe
+	Pipe struct {
+		workerNumber uint
+		out, pfunc   interface{}
+		closed       bool
 	}
 
 	// PHandler is the interface that manages the pipe
@@ -235,26 +263,48 @@ type (
 		Fn() reflect.Value
 		Workers() uint
 		SetWorkers(uint)
+		Close()
+		Closed() bool
 	}
 )
 
+// createOutput creates a new channel for output for this pipe
+func (p *Pipe) createOutput() (err error) {
+	p.out = reflect.Indirect(reflect.MakeChan(
+		reflect.ChanOf(reflect.BothDir, reflect.TypeOf(p.Fn().Interface()).Out(0)),
+		int(p.Workers()),
+	)).Interface()
+
+	return
+}
+
 // Output returns the reflect.Value of the pipe's output channel
-func (p *P) Output() reflect.Value {
-	return reflect.ValueOf(p.Out)
+func (p *Pipe) Output() reflect.Value {
+	return reflect.ValueOf(p.out)
 }
 
 // Fn returns the reflect.Value of the pipe's function
-func (p *P) Fn() reflect.Value {
-	return reflect.ValueOf(p.Func)
+func (p *Pipe) Fn() reflect.Value {
+	return reflect.ValueOf(p.pfunc)
 }
 
 // Workers returns the pipe's number of workers
-func (p *P) Workers() uint {
-	return p.WorkerNumber
+func (p *Pipe) Workers() uint {
+	return p.workerNumber
 }
 
 // SetWorkers sets a new pipe's number of workers
-func (p *P) SetWorkers(d uint) {
+func (p *Pipe) SetWorkers(d uint) {
 	dd := math.Min(float64(d), float64(MaxWorkers))
-	p.WorkerNumber = uint(dd)
+	p.workerNumber = uint(dd)
+}
+
+// Close sets pipe to closed
+func (p *Pipe) Close() {
+	p.closed = true
+}
+
+// Closed checks if pipe is closed
+func (p *Pipe) Closed() bool {
+	return p.closed
 }
