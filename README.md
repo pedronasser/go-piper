@@ -15,22 +15,21 @@ go get github.com/pedronasser/go-piper/piper
 After importing: `github.com/pedronasser/go-piper/piper`
 
 ```go
-    // Creating new piper
+// Creating new piper
 
-    {{piper var}}, {{error var}} := piper.New(
+{{piper var}}, {{error var}} := piper.New(
 
-        {{ repeat for each Step }}
-        piper.P( {{NumberOfWorkers uint}}, {{StepFunction func}} ),
-        {{ end }}
-        
-    )
+    {{ repeat for each Step }}
+    piper.P( {{NumberOfWorkers uint}}, {{StepFunction func}} ),
+    {{ end }}
     
-    // Input channel
-    {{piper var}}.Input().(chan {{FirstStep Argument Type}})
-    
-    // Output channel
-    {{piper var}}.Output().(chan {{LastStep Return Type}})
-    
+)
+
+// Input channel
+{{piper var}}.Input().(chan {{FirstStep Argument Type}})
+
+// Output channel
+{{piper var}}.Output().(chan {{LastStep Return Type}})
 ```
 
 ## Example
@@ -48,7 +47,7 @@ func main() {
 
 	// Create a new piper
 	pipe, err := piper.New(
-		// Now the steps sequentially (...*piper.P)
+		// Now the steps sequentially (...piper.Pipe)
 		piper.P(
 			2,                                // number of workers (goroutines), in this case 2
 			func(d int) int { return d * 2 }, // step's function

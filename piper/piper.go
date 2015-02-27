@@ -82,7 +82,7 @@ func (p *Piper) createInput() (err error) {
 	p.in = reflect.Indirect(
 		reflect.MakeChan(
 			reflect.ChanOf(reflect.BothDir, reflect.TypeOf(target.Fn().Interface()).In(0)),
-			int(target.Workers()),
+			0,
 		),
 	).Interface()
 
@@ -95,7 +95,7 @@ func (p *Piper) createOutput() (err error) {
 	p.out = reflect.Indirect(
 		reflect.MakeChan(
 			reflect.ChanOf(reflect.BothDir, reflect.TypeOf(target.Fn().Interface()).Out(0)),
-			int(target.Workers()),
+			0,
 		),
 	).Interface()
 
@@ -272,7 +272,7 @@ type (
 func (p *Pipe) createOutput() (err error) {
 	p.out = reflect.Indirect(reflect.MakeChan(
 		reflect.ChanOf(reflect.BothDir, reflect.TypeOf(p.Fn().Interface()).Out(0)),
-		int(p.Workers()),
+		0,
 	)).Interface()
 
 	return
