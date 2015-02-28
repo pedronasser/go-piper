@@ -1,8 +1,8 @@
 package piper
 
 import (
-	"testing"
 	"sync"
+	"testing"
 )
 
 // Build a default int-typed Piper
@@ -125,9 +125,9 @@ func BenchmarkInputOutputMultiple(b *testing.B) {
 		),
 	)
 
-    for d := 0; d < b.N; d++ {
-	    piper.Input().(chan int) <- 1
-    }
+	for d := 0; d < b.N; d++ {
+		piper.Input().(chan int) <- 1
+	}
 
 	for i := 0; i < b.N; i++ {
 		<-piper.Output().(chan int)
@@ -135,7 +135,7 @@ func BenchmarkInputOutputMultiple(b *testing.B) {
 }
 
 func BenchmarkInputOutputMultipleBuffered(b *testing.B) {
-    var wg sync.WaitGroup
+	var wg sync.WaitGroup
 
 	piper, _ := New(
 		P(
@@ -144,12 +144,12 @@ func BenchmarkInputOutputMultipleBuffered(b *testing.B) {
 		),
 	)
 
-    wg.Add(1)
-    for d := 0; d < b.N; d++ {
-	    piper.Input().(chan int) <- 1
-    }
+	wg.Add(1)
+	for d := 0; d < b.N; d++ {
+		piper.Input().(chan int) <- 1
+	}
 
-    wg.Done()
+	wg.Done()
 	for i := 0; i < b.N; i++ {
 		<-piper.Output().(chan int)
 	}

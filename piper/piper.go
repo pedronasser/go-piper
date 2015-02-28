@@ -64,12 +64,12 @@ func newPiper(pipefn []Pipe) (p *Piper, err error) {
 
 	var pipe Pipe
 	for _, pipe = range p.pipes {
-	    p.checkPipe(&pipe);
+		p.checkPipe(&pipe)
 	}
 	p.lastPipe = reflect.ValueOf(pipe.out)
 
-	p.createInput();
-    p.createOutput();
+	p.createInput()
+	p.createOutput()
 
 	p.run()
 
@@ -255,6 +255,7 @@ type (
 		workerNumber uint
 		out, pfunc   interface{}
 		closed       bool
+		mu           sync.Mutex
 	}
 
 	// PHandler is the interface that manages the pipe
@@ -290,21 +291,29 @@ func (p *Pipe) Fn() reflect.Value {
 
 // Workers returns the pipe's number of workers
 func (p *Pipe) Workers() uint {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.workerNumber
 }
 
 // SetWorkers sets a new pipe's number of workers
 func (p *Pipe) SetWorkers(d uint) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	dd := math.Min(float64(d), float64(MaxWorkers))
 	p.workerNumber = uint(dd)
 }
 
 // Close sets pipe to closed
 func (p *Pipe) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.closed = true
 }
 
 // Closed checks if pipe is closed
 func (p *Pipe) Closed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.closed
 }
