@@ -2,7 +2,11 @@
 
 [![Join the chat at https://gitter.im/pedronasser/go-piper](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/pedronasser/go-piper?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
-A functional concurrent pipeline builder and management for Go 
+An easy way to build your Go programs using a pipeline pattern using channels and multiple goroutines.
+
+This package creates N goroutines for each pipeline step all connected through unbuffered channels and manages everything.
+
+Read more here: https://medium.com/@pedroncs/let-the-piper-starts-to-play-cdacdbe120a0
 
 For more documentation, please refer to [![GoDoc](https://godoc.org/github.com/pedronasser/go-piper/piper?status.png)](https://godoc.org/github.com/pedronasser/go-piper/piper)
 
@@ -80,6 +84,10 @@ func main() {
 
 }
 ```
+
+## Other examples
+
+- https://medium.com/@pedroncs/go-piper-experiments-jpeg-resizer-40c29ddcd1b
 
 ## License
 
