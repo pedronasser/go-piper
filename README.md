@@ -1,4 +1,4 @@
-# go-piper (experimental)
+# go-piper (v1.0.0)
 
 [![Join the chat at https://gitter.im/pedronasser/go-piper](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/pedronasser/go-piper?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
@@ -6,36 +6,12 @@ An easy way to build your Go programs using a pipeline pattern using channels an
 
 This package creates N goroutines for each pipeline step all connected through unbuffered channels and manages everything.
 
-Read more here: https://medium.com/@pedroncs/let-the-piper-starts-to-play-cdacdbe120a0
-
-For more documentation, please refer to [![GoDoc](https://godoc.org/github.com/pedronasser/go-piper/piper?status.png)](https://godoc.org/github.com/pedronasser/go-piper/piper)
+For more documentation, please refer to [![GoDoc](https://godoc.org/github.com/pedronasser/go-piper?status.png)](https://godoc.org/github.com/pedronasser/go-piper)
 
 ## Install
 
 ```bash
-go get github.com/pedronasser/go-piper/piper
-```
-
-## API Schema
-
-After importing: `github.com/pedronasser/go-piper/piper`
-
-```go
-// Creating new piper
-
-{{piper var}}, {{error var}} := piper.New(
-
-    {{ repeat for each Step }}
-    piper.P( {{NumberOfWorkers uint}}, {{StepFunction func}} ),
-    {{ end }}
-    
-)
-
-// Input channel
-{{piper var}}.Input().(chan {{FirstStep Argument Type}})
-
-// Output channel
-{{piper var}}.Output().(chan {{LastStep Return Type}})
+go get github.com/pedronasser/go-piper
 ```
 
 ## Example
@@ -44,50 +20,63 @@ After importing: `github.com/pedronasser/go-piper/piper`
 package main
 
 import (
-	"fmt"
-	"github.com/pedronasser/go-piper/piper"
-	"strconv"
+        "fmt"
+        "strconv"
+
+        // Import go-piper
+        "github.com/pedronasser/go-piper"
 )
 
 func main() {
+        // Create new Piper
+        pipe, err := piper.New(
 
-	// Create a new piper
-	pipe, err := piper.New(
-		// Now the steps sequentially (...piper.Pipe)
-		piper.P(
-			2,                                // number of workers (goroutines), in this case 2
-			func(d int) int { return d * 2 }, // step's function
-			// Translation: Two workers (goroutines) running the step's function will send the output
-		),
-		piper.P(1, func(d int) int { return d * d }),
-		piper.P(2, func(d int) string { return strconv.Itoa(d) }),
-	)
+                // Creating first step
+                piper.P(1, // Number of workers
+                        
+                        // First step's function
+                        func(d interface{}) interface{} { // Should always receive and return interface{}
+                                var i int = d.(int) // Asserting `d` as integer
+                                var r int = i * i
+                                return r
+                        },
+                ),
 
-	if err != nil {
-		panic(err)
-	}
+                // Creating second step
+                piper.P(1, // Number of workers
 
-	// Defer to close the pipeline at the and of this function
-	defer pipe.Close()
+                        // Second step's function
+                        func(d interface{}) interface{} { // Should always receive and return interface{}
+                                var i int = d.(int) // Asserting `d ` as integer
+                                var r string = strconv.Itoa(i)
+                                return r // returning as string
+                        },
+                ),
+        )
 
-    in := pipe.Input().(chan int)
-    out := pipe.Output().(chan string)
+        // Error check
+        if err != nil {
+                panic(err)
+        }
 
-	// Sending some data to be consumed
-	in <- 1 // first data
-	in <- 1 // second data
+        // Defering close
+        defer pipe.Close()
 
-	// Waiting for first ouput
-	fmt.Println(<- out)
-	// Waiting for second ouput
-	fmt.Println(<- out)
+        // Getting input and output channels
+        in := pipe.Input()
+        out := pipe.Output()
 
+        in <- 1 // Sending first data
+        in <- 1 // Sending second data
+
+        fmt.Println((<-out).(string)) // Receiving first result
+        fmt.Println((<-out).(string)) // Receiving second result
 }
 ```
 
 ## Other examples
 
-- https://medium.com/@pedroncs/go-piper-experiments-jpeg-resizer-40c29ddcd1b
+- https://github.com/pedronasser/go-piper/blob/master/examples/
 
 ## License
 
