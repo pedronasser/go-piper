@@ -3,7 +3,6 @@ package piper
 import (
 	"errors"
 	"math"
-	"reflect"
 	"sync"
 )
 
@@ -28,31 +27,29 @@ var (
 type (
 	// Piper is the main struct on the piper
 	Piper struct {
-		mu       sync.Mutex
-		pipes    []Pipe
-		lastPipe reflect.Value
-		kill     reflect.Value
-		closed   bool
-		in       interface{}
-		out      interface{}
+		mu     sync.Mutex
+		pipes  []*Pipe
+		closed bool
+		in     chan interface{}
+		out    chan interface{}
 	}
 
 	// Handler manages the piper struct
 	Handler interface {
 		Close() error
-		Input() interface{}
-		Output() interface{}
+		Input() chan interface{}
+		Output() chan interface{}
 	}
 )
 
 // New creates a new piper instance
-func New(pipefn ...Pipe) (Handler, error) {
+func New(pipefn ...*Pipe) (Handler, error) {
 	piper, err := newPiper(pipefn)
 	return Handler(piper), err
 }
 
 // Newpiper creates a new Piper from a channel and []*F
-func newPiper(pipefn []Pipe) (p *Piper, err error) {
+func newPiper(pipefn []*Pipe) (p *Piper, err error) {
 	if len(pipefn) == 0 {
 		return nil, ErrNoPiperFunc
 	}
@@ -62,15 +59,13 @@ func newPiper(pipefn []Pipe) (p *Piper, err error) {
 		closed: false,
 	}
 
-	var pipe Pipe
-	for _, pipe = range p.pipes {
-		p.checkPipe(&pipe)
+	for i := range pipefn {
+		p.checkPipe(p.pipes[i])
 	}
-	p.lastPipe = reflect.ValueOf(pipe.out)
+
+	p.out = p.pipes[len(p.pipes)-1].out
 
 	p.createInput()
-	p.createOutput()
-
 	p.run()
 
 	return
@@ -78,26 +73,7 @@ func newPiper(pipefn []Pipe) (p *Piper, err error) {
 
 // createInput cretes a new input channel based on the type of the first step's argument
 func (p *Piper) createInput() (err error) {
-	target := p.pipes[0]
-	p.in = reflect.Indirect(
-		reflect.MakeChan(
-			reflect.ChanOf(reflect.BothDir, reflect.TypeOf(target.Fn().Interface()).In(0)),
-			0,
-		),
-	).Interface()
-
-	return
-}
-
-// createOutput cretes a new input channel based on the type of the last step's return
-func (p *Piper) createOutput() (err error) {
-	target := p.pipes[len(p.pipes)-1]
-	p.out = reflect.Indirect(
-		reflect.MakeChan(
-			reflect.ChanOf(reflect.BothDir, reflect.TypeOf(target.Fn().Interface()).Out(0)),
-			0,
-		),
-	).Interface()
+	p.in = make(chan interface{})
 
 	return
 }
@@ -117,82 +93,45 @@ func (p *Piper) run() (err error) {
 		return ErrNoPiperFunc
 	}
 
-	var prev reflect.Value
-	prev = reflect.ValueOf(p.in)
-	p.kill = reflect.ValueOf(make(chan bool, len(p.pipes)+1))
+	prev := p.in
 
-	for _, pipe := range p.pipes {
-		prev = p.runPipe(&pipe, prev)
+	for i := range p.pipes {
+		prev = p.runPipe(i, prev)
 	}
-
-	go p.outputMonitor()
 
 	return nil
 }
 
-// GetOutput gets the reflect.Value of the pipe's output channel
-func (p *Piper) GetOutput(pipe PHandler) reflect.Value {
+// GetOutput gets the pipe's output channel
+func (p *Piper) GetOutput(pipe PHandler) interface{} {
 	return pipe.Output()
 }
 
 // runPipe creates and run the target step's goroutine.
-func (p *Piper) runPipe(pipe PHandler, prev reflect.Value) (output reflect.Value) {
+func (p *Piper) runPipe(index int, last chan interface{}) (output chan interface{}) {
+	pipe := p.pipes[index]
+
 	output = pipe.Output()
-	fn := pipe.Fn()
 
 	var w uint
+	pipe.kill = make(chan bool, pipe.Workers())
 	for w = 0; w < pipe.Workers(); w++ {
 		go func() {
-			selects := []reflect.SelectCase{
-				reflect.SelectCase{Dir: reflect.SelectRecv, Chan: prev},
-				reflect.SelectCase{Dir: reflect.SelectRecv, Chan: p.kill},
-			}
-
+			fn := p.pipes[index].Fn()
 			for {
-				chosen, recv, ok := reflect.Select(selects)
-				switch chosen {
-				case 0:
-					if ok {
-						v := fn.Call([]reflect.Value{recv})
-						output.Send(v[0])
-					}
-				case 1:
-					if pipe.Closed() == false {
-						output.Close()
-						pipe.Close()
-					}
+				select {
+				case v := <-last:
+					r := fn(v)
+					output <- r
+				case <-pipe.kill:
+					close(output)
 					return
 				}
 			}
-
 		}()
 	}
 
 	return
-}
-
-// Goroutine the monitors the last step's channel
-// waiting for the final response.
-func (p *Piper) outputMonitor() {
-	for {
-		selects := []reflect.SelectCase{
-			reflect.SelectCase{Dir: reflect.SelectRecv, Chan: p.lastPipe},
-			reflect.SelectCase{Dir: reflect.SelectRecv, Chan: p.kill},
-		}
-
-		for {
-			chosen, recv, ok := reflect.Select(selects)
-			switch chosen {
-			case 0:
-				if ok {
-					reflect.ValueOf(p.out).Send(recv)
-				}
-			case 1:
-				return
-			}
-
-		}
-	}
 }
 
 // This methods clear all information on the *Piper struct
@@ -212,38 +151,28 @@ func (p *Piper) Close() error {
 
 	p.closed = true
 
-	tru := reflect.ValueOf(p.closed)
-
-	var w uint
-	for i := 0; i < len(p.pipes); i++ {
-		for w = 0; w < p.pipes[i].workerNumber; w++ {
-			p.kill.Send(tru)
-		}
+	for _, pipe := range p.pipes {
+		pipe.KillChannel()
 	}
-	p.kill.Send(tru)
-
-	p.kill.Close()
-	p.clear()
 
 	return nil
 }
 
 // Input returns the piper's input channel
-func (p *Piper) Input() interface{} {
+func (p *Piper) Input() chan interface{} {
 	return p.in
 }
 
 // Output returns the piper's output channel
-func (p *Piper) Output() interface{} {
+func (p *Piper) Output() chan interface{} {
 	return p.out
 }
 
 // P creates a new P (pipe)
-func P(w uint, fn interface{}) (pipe Pipe) {
-	pipe = Pipe{}
+func P(w uint, fn func(interface{}) interface{}) (pipe *Pipe) {
+	pipe = &Pipe{}
 	pipe.workerNumber = w
 	pipe.pfunc = fn
-
 	pipe.createOutput()
 
 	return
@@ -253,17 +182,19 @@ type (
 	// Pipe is the main struct for the pipe
 	Pipe struct {
 		workerNumber uint
-		out, pfunc   interface{}
+		out          chan interface{}
+		pfunc        func(interface{}) interface{}
 		closed       bool
-		mu           sync.Mutex
+		kill         chan bool
 	}
 
 	// PHandler is the interface that manages the pipe
 	PHandler interface {
-		Output() reflect.Value
-		Fn() reflect.Value
+		Output() chan interface{}
+		Fn() func(interface{}) interface{}
 		Workers() uint
 		SetWorkers(uint)
+		KillChannel()
 		Close()
 		Closed() bool
 	}
@@ -271,49 +202,46 @@ type (
 
 // createOutput creates a new channel for output for this pipe
 func (p *Pipe) createOutput() (err error) {
-	p.out = reflect.Indirect(reflect.MakeChan(
-		reflect.ChanOf(reflect.BothDir, reflect.TypeOf(p.Fn().Interface()).Out(0)),
-		0,
-	)).Interface()
+	p.out = make(chan interface{})
 
 	return
 }
 
-// Output returns the reflect.Value of the pipe's output channel
-func (p *Pipe) Output() reflect.Value {
-	return reflect.ValueOf(p.out)
+// Output returns the pipe's output channel
+func (p *Pipe) Output() chan interface{} {
+	return p.out
 }
 
-// Fn returns the reflect.Value of the pipe's function
-func (p *Pipe) Fn() reflect.Value {
-	return reflect.ValueOf(p.pfunc)
+// Fn returns the pipe's function
+func (p *Pipe) Fn() func(interface{}) interface{} {
+	return p.pfunc
 }
 
 // Workers returns the pipe's number of workers
 func (p *Pipe) Workers() uint {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.workerNumber
 }
 
 // SetWorkers sets a new pipe's number of workers
 func (p *Pipe) SetWorkers(d uint) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	dd := math.Min(float64(d), float64(MaxWorkers))
 	p.workerNumber = uint(dd)
 }
 
+// KillChannel kill all working goroutines
+func (p *Pipe) KillChannel() {
+	workers := int(p.Workers())
+	for w := 0; w < workers; w++ {
+		p.kill <- true
+	}
+}
+
 // Close sets pipe to closed
 func (p *Pipe) Close() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.closed = true
 }
 
 // Closed checks if pipe is closed
 func (p *Pipe) Closed() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.closed
 }

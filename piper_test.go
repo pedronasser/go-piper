@@ -1,16 +1,13 @@
 package piper
 
-import (
-	"sync"
-	"testing"
-)
+import "testing"
 
-// Build a default int-typed Piper
+// Build a default Piper
 func BuildTestPipe(t *testing.T) (piper Handler) {
 	piper, err := New(
 		P(
 			1,
-			func(d int) int { return d + 1 },
+			func(d interface{}) interface{} { return d.(int) + 1 },
 		),
 	)
 
@@ -28,25 +25,15 @@ func TestNewPipe(t *testing.T) {
 func TestNewPipeInputOutput(t *testing.T) {
 	piper := BuildTestPipe(t)
 
-	input, ok := piper.Input().(chan int)
+	input := piper.Input()
+	output := piper.Output()
 
-	if !ok {
-		t.Errorf("Expected `input` to be `chan int` (got %+v)", input)
-	}
-
-	output, ok2 := piper.Output().(chan int)
-
-	if !ok2 {
-		t.Errorf("Expected `output` to be `chan int` (got %+v)", output)
-	}
-
-	var result int
 	expect := 2
 
 	input <- 1
-	result = <-output
+	result := <-output
 
-	if result != expect {
+	if result.(int) != expect {
 		t.Errorf("Expected `result` to be `%d` (got %d)", expect, result)
 	}
 }
@@ -71,7 +58,7 @@ func TestClosePipe(t *testing.T) {
 
 func TestPipeCheck(t *testing.T) {
 	_, err := newPiper(
-		[]Pipe{},
+		[]*Pipe{},
 	)
 
 	if err != ErrNoPiperFunc {
@@ -79,10 +66,10 @@ func TestPipeCheck(t *testing.T) {
 	}
 
 	piper, _ := newPiper(
-		[]Pipe{
+		[]*Pipe{
 			P(
 				0,
-				func(d int) int { return d },
+				func(d interface{}) interface{} { return d },
 			),
 		},
 	)
@@ -94,8 +81,8 @@ func TestPipeCheck(t *testing.T) {
 		t.Errorf("Expected `w` to be '%d' (got '%d')", expected, w)
 	}
 
-	output := piper.GetOutput(&piper.pipes[0]).Interface()
-	if _, ok := output.(chan int); !ok {
+	output := piper.GetOutput(piper.pipes[0])
+	if _, ok := output.(chan interface{}); !ok {
 		t.Errorf("Expected `pipe.GetOutput` to return a '%+v' (got '%+v')", "chan int", output)
 	}
 
@@ -104,16 +91,58 @@ func TestPipeCheck(t *testing.T) {
 // Benchmarks
 
 func BenchmarkInputOutputSingle(b *testing.B) {
+
+	fn := func(d interface{}) interface{} { return d.(int) }
+
 	piper, _ := New(
-		P(
-			1,
-			func(d int) int { return d },
-		),
+		P(100, fn),
 	)
+	input := piper.Input()
+	output := piper.Output()
+
+	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		piper.Input().(chan int) <- 1
-		<-piper.Output().(chan int)
+		input <- 1
+		<-output
+	}
+}
+
+func BenchmarkInputOutputSingleNoReflect(b *testing.B) {
+
+	fn := func(d int) int { return d }
+	steps := 1
+	workers := 100
+
+	input := make(chan int)
+	in := input
+
+	for s := 0; s < steps; s++ {
+		sin := in
+		out := make(chan int)
+		kill := make(chan bool)
+		for w := 0; w < workers; w++ {
+			go func() {
+				for {
+					select {
+					case v := <-sin:
+						out <- fn(v)
+					case <-kill:
+						return
+					}
+				}
+			}()
+		}
+		in = out
+	}
+
+	output := in
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		input <- 1
+		<-output
 	}
 }
 
@@ -121,47 +150,31 @@ func BenchmarkInputOutputMultiple(b *testing.B) {
 	piper, _ := New(
 		P(
 			uint(b.N),
-			func(d int) int { return d },
+			func(d interface{}) interface{} { return d },
 		),
 	)
 
+	input := piper.Input()
+	output := piper.Output()
+
+	b.ResetTimer()
+
 	for d := 0; d < b.N; d++ {
-		piper.Input().(chan int) <- 1
+		input <- 1
 	}
 
 	for i := 0; i < b.N; i++ {
-		<-piper.Output().(chan int)
-	}
-}
-
-func BenchmarkInputOutputMultipleBuffered(b *testing.B) {
-	var wg sync.WaitGroup
-
-	piper, _ := New(
-		P(
-			uint(b.N),
-			func(d int) int { wg.Wait(); return d },
-		),
-	)
-
-	wg.Add(1)
-	for d := 0; d < b.N; d++ {
-		piper.Input().(chan int) <- 1
-	}
-
-	wg.Done()
-	for i := 0; i < b.N; i++ {
-		<-piper.Output().(chan int)
+		<-output
 	}
 }
 
 func BenchmarkThousandsPipes(b *testing.B) {
-	pipes := make([]Pipe, 10000)
+	pipes := make([]*Pipe, 1000)
 
-	for i := 0; i < 10000; i++ {
+	for i := 0; i < 1000; i++ {
 		pipes[i] = P(
-			1,
-			func(d int) int { return d },
+			uint(1),
+			func(d interface{}) interface{} { return d },
 		)
 	}
 
@@ -169,8 +182,13 @@ func BenchmarkThousandsPipes(b *testing.B) {
 		pipes,
 	)
 
+	input := piper.Input()
+	output := piper.Output()
+
+	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		piper.Input().(chan int) <- 1
-		<-piper.Output().(chan int)
+		input <- 1
+		<-output
 	}
 }
