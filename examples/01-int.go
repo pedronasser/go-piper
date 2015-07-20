@@ -1,4 +1,8 @@
-package main
+// This example just shows a way of creating a single 2-step pipeline.
+// Each step will have only one worker.
+// Both steps will input and output integers.
+
+package simpleint
 
 import (
 	"fmt"
@@ -12,15 +16,30 @@ func main() {
 	pipe, err := piper.New(
 		piper.P(1,
 			func(d interface{}) interface{} {
-				var i int = d.(int)
-				var r int = i * i
+				var i int
+				var ok bool
+
+				if _, ok = d.(int); !ok {
+					// If not integer, discard
+					return nil
+				}
+
+				r := i * i
+
 				return r
 			},
 		),
 		piper.P(1,
 			func(d interface{}) interface{} {
-				var i int = d.(int)
-				var r string = strconv.Itoa(i)
+				var i int
+				var ok bool
+
+				if _, ok = d.(int); !ok {
+					// If not integer, discard
+					return nil
+				}
+
+				r := strconv.Itoa(i)
 				return r
 			},
 		),

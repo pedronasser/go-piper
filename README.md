@@ -1,10 +1,14 @@
-# go-piper (v1.0.0)
+# go-piper
 
 [![Join the chat at https://gitter.im/pedronasser/go-piper](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/pedronasser/go-piper?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
-An easy way to build your Go programs using a pipeline pattern using channels and multiple goroutines.
+An easy way to build your Go programs with a pipeline pattern.
 
-This package creates N goroutines for each pipeline step all connected through unbuffered channels and manages everything.
+Go-piper creates N goroutines for each pipeline step all connected through unbuffered channels.
+The input data is guided through all steps' workers and the result is sent to the output channel.
+
+### Important
+The pipeline will only work if your output channel is constantly consumed.
 
 For more documentation, please refer to [![GoDoc](https://godoc.org/github.com/pedronasser/go-piper?status.png)](https://godoc.org/github.com/pedronasser/go-piper)
 
@@ -33,11 +37,18 @@ func main() {
 
                 // Creating first step
                 piper.P(1, // Number of workers
-                        
+
                         // First step's function
                         func(d interface{}) interface{} { // Should always receive and return interface{}
-                                var i int = d.(int) // Asserting `d` as integer
-                                var r int = i * i
+                                var i int
+                                var ok bool
+
+                                if i, ok = d.(int); !ok {
+                                    // If not integer, discard
+                                    return nil
+                                }
+
+                                r := i * i
                                 return r
                         },
                 ),
@@ -47,8 +58,15 @@ func main() {
 
                         // Second step's function
                         func(d interface{}) interface{} { // Should always receive and return interface{}
-                                var i int = d.(int) // Asserting `d ` as integer
-                                var r string = strconv.Itoa(i)
+                                var i int
+                                var ok bool
+
+                                if i, ok = d.(int); !ok {
+                                    // If not integer, discard
+                                    return nil
+                                }
+
+                                r := strconv.Itoa(i)
                                 return r // returning as string
                         },
                 ),
